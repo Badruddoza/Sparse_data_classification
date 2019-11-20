@@ -29,40 +29,31 @@ ggplot(data=dat0,aes(x=time,y=mean,color=mal))+
   theme_bw()
 
 
+#Dealing with the missing data
+
 #reshape
 dat1<-spread(dat0,time,mean)
 head(dat1)
 
-#Dealing with the missing data
-#choose only the data matrix
-#dat2<-dat1[, grepl("mean",names(dat1))]
-
-#METHOD 1#replace missing with mean
-dat2<-dat1
-dat2_miss<-which(is.na(dat2),arr.ind=TRUE)
-dat2[dat2_miss]<-rowMeans(dat2[,3:dim(dat2)[2]],na.rm=TRUE)[dat2_miss[,1]]
-head(dat2)
-
-#replace missing using zoo constant method
+#replace missing values using zoo constant method
 dat2<-dat1
 for(i in 1:dim(dat2)[1]){
   temp<-c(dat2[i,3:dim(dat2)[2]])
   temp<-na.approx(temp,rule=2,na.rm=FALSE)
   dat2[i,3:dim(dat2)[2]]<-temp
 }
-#replace the remaining missing values with means
+#replace the remaining missing values with row means
 dat2_miss<-which(is.na(dat2),arr.ind=TRUE)
 dat2[dat2_miss]<-rowMeans(dat2[,3:dim(dat2)[2]],na.rm=TRUE)[dat2_miss[,1]]
 head(dat2)
 
-
-
-#make the new data long format and compare
+#make the new data long format
 dat3<-gather(dat2,"time","mean",3:dim(dat2)[2])
 dat4<-merge(dat0,dat3,by=c("id","time","mal"),all=TRUE)
 dat4$time<-as.numeric(dat4$time)
 head(dat4)
 
+#compare observed and fitted
 ggplot(data=dat4)+
   geom_point(aes(x=time,y=mean.x,color=mal))+
   geom_line(aes(x=time,y=mean.y,group=id),alpha=.1)+
