@@ -37,13 +37,13 @@ head(dat1)
 #choose only the data matrix
 #dat2<-dat1[, grepl("mean",names(dat1))]
 
-#replace missing with mean
+#METHOD 1#replace missing with mean
 dat2<-dat1
 dat2_miss<-which(is.na(dat2),arr.ind=TRUE)
 dat2[dat2_miss]<-rowMeans(dat2[,3:dim(dat2)[2]],na.rm=TRUE)[dat2_miss[,1]]
 head(dat2)
 
-#replace missing using zoo constant method
+#METHOD 2#replace missing using zoo constant method
 dat2<-dat1
 for(i in 1:dim(dat2)[1]){
   temp<-c(dat2[i,3:dim(dat2)[2]])
@@ -52,14 +52,15 @@ for(i in 1:dim(dat2)[1]){
 }
 head(dat2)
 
-#replace missing using zoo constant method
+#METHOD 3#replace missing using zoo spline slope method
 dat2<-dat1
 for(i in 1:dim(dat2)[1]){
   temp<-c(dat2[i,3:dim(dat2)[2]])
-  temp<-na.approx(temp,rule=2,na.rm=FALSE)
+  temp<-na.spline(temp,na.rm=FALSE)
   dat2[i,3:dim(dat2)[2]]<-temp
 }
 head(dat2)
+
 
 #make the new data long format and compare
 dat3<-gather(dat2,"time","mean",3:dim(dat2)[2])
