@@ -1,0 +1,38 @@
+---
+title:  "Classification of Gaussian Processes"
+author:
+- "Syed Badruddoza"
+- "Yuan Wang"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+tags: [Classification, Gaussian]
+abstract: |
+  This article compares various classifiers of sparse data in terms of their predictability. Classifiers include Generalized Linear Model (GLM), Kernel, nonparametric, K Nearest Neighbors, Neural Networks, and Random Forests. We assume that the underlying processes are Gaussian, and interpolate the missing observations linearly connecting observed points, and extending the polar observed points to outer missing regions. Results show
+output: 
+    pdf_document:
+        template: NULL
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
