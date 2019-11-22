@@ -12,9 +12,19 @@ output:
         template: NULL
 ---
 
-
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(zoo)
+library(fda.usc)
+library(tidyr)
+library(dplyr)
+library(caret)
+library(xtable)
+library(stringi)
+options(knitr.table.format = 'pandoc', knitr.kable.NA='')
 ```
 
 ## Introduction
@@ -23,16 +33,140 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+```{r, echo=FALSE}
+setwd("E:/2. Other research/1. Classification of Gaussian Process/actual data")
+
+################################################################# load data set
+dat=readRDS("Adrenal-EMRE-dynamic.RDS")
+#separate out the working data and rename variables
+dat0<-cbind.data.frame(mal=as.factor(dat$malignancy),
+                       id=as.factor(dat$lesionID),
+                       time=as.integer(dat$time),
+                       mean=as.numeric(dat$calc_mean))
+dat_sum<-summary(dat0)
+kable(dat_sum, caption="Summary Statistics") %>%
+  kable_styling(bootstrap_options=c("striped","hover"))
 ```
 
-## Including Plots
+Plotting of the data set with connecting observed values yield the following pattern.
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r, echo=FALSE}
+require(ggplot2)
+#plot the data set
+ggplot(data=dat0,aes(x=time,y=mean,color=mal))+
+  geom_point()+
+  geom_line(aes(group=id), alpha = 0.2)+
+  ggtitle("Scan results over time")+
+  xlab("Time of scan")+
+  ylab("Mean Index")+
+  labs(color="Malignancy")+
+  theme_bw()
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Dealing with missing values
+
+```{r, echo=FALSE}
+################################################## Dealing with the missing data
+
+#reshape
+dat1<-spread(dat0,time,mean)
+
+#replace missing values using zoo constant method
+dat2<-dat1
+for(i in 1:dim(dat2)[1]){
+  temp<-c(dat2[i,3:dim(dat2)[2]])
+  temp<-na.approx(temp,rule=2,na.rm=FALSE)
+  dat2[i,3:dim(dat2)[2]]<-temp
+}
+#replace the remaining missing values with row means
+dat2_miss<-which(is.na(dat2),arr.ind=TRUE)
+dat2[dat2_miss]<-rowMeans(dat2[,3:dim(dat2)[2]],na.rm=TRUE)[dat2_miss[,1]]
+
+#make the new data long format
+dat3<-gather(dat2,"time","mean",3:dim(dat2)[2])
+dat4<-merge(dat0,dat3,by=c("id","time","mal"),all=TRUE)
+dat4$time<-as.numeric(dat4$time)
+
+#compare observed and fitted
+ggplot(data=dat4)+
+  geom_point(aes(x=time,y=mean.x,color=mal))+
+  geom_line(aes(x=time,y=mean.y,group=id),alpha=.1)+
+  ggtitle("Scan results over time")+
+  xlab("Time of scan")+
+  ylab("Mean Index")+
+  labs(color="Malignancy")+
+  theme_classic()
+```
+
+## Analysis
+
+```{r, echo=FALSE}
+######################################################### Analysis
+#using fda.usc
+mdata<-dat2[3:dim(dat2)[2]]
+mlearn=fdata(mdata)
+glearn=dat2$mal
+dataf<-data.frame(glearn) 
+data1=list("df"=dataf,"x"=mlearn)
+a1<-classif.glm(glearn~x, data=data1)
+newdat<-list("x"=mlearn) 
+p1<-as.factor(predict.classif(a1,newdat) )
+acc=function(x, y){sum(x==y)/length(x)}
+err.glm=acc(p1, glearn)
+
+
+out.glm=classif.glm(glearn~x, data = data1)
+out.np=classif.np(glearn,mlearn)
+out.knn=classif.knn(glearn,mlearn,knn=c(3,5,7))
+out.kernel=classif.kernel(glearn,mlearn)
+```
+
+```{r, echo=FALSE, include=FALSE}
+res.glm=summary.classif(out.glm)
+res.np=summary.classif(out.np)
+res.knn=summary.classif(out.knn)
+res.kernel=summary.classif(out.kernel)
+
+```
+
+```{r, echo=FALSE}
+#using machine learning
+#neural network
+nn<-train(
+  x=mdata,
+  y=dat2$mal,
+  method="nnet",
+  trace=FALSE)
+res.nn<-c()
+res.nn$nn<-nn
+cm_nn<-confusionMatrix(nn)
+pcc0_nn<-cm_nn$table[1,1]/(cm_nn$table[1,1]+cm_nn$table[2,1])
+pcc1_nn<-cm_nn$table[2,2]/(cm_nn$table[1,2]+cm_nn$table[2,2])
+res.nn$prob.classification<-c(pcc0_nn, pcc1_nn)
+#random forests
+rf<-train(
+  x=mdata,
+  y=dat2$mal,
+  method="ranger")
+res.rf<-c()
+res.rf<-rf
+
+cm_rf<-confusionMatrix(rf)
+pcc0_rf<-cm_rf$table[1,1]/(cm_rf$table[1,1]+cm_rf$table[2,1])
+pcc1_rf<-cm_rf$table[2,2]/(cm_rf$table[1,2]+cm_rf$table[2,2])
+res.rf$prob.classification<-c(pcc0_rf, pcc1_rf)
+
+########################################################## All results together
+result<-rbind(unname(res.glm$prob.classification),
+                 unname(res.kernel$prob.classification),
+                 unname(res.knn$prob.classification),
+                 unname(res.np$prob.classification),
+                 unname(res.nn$prob.classification),
+                 unname(res.rf$prob.classification) )
+Method<-c("GLM","Kernel","K Nearest Neighbors","Non-parametric","Neural Network","Random Forests")
+result1<-cbind.data.frame(Method=Method,"Probability of identifying non-malignant"=result[,1],"Probability of identifying malignant"=result[,2])
+
+kable(result1, caption="Summary of Findings") %>%
+  kable_styling(bootstrap_options=c("striped","hover")) %>%
+  column_spec(2:3, width="5cm")
+```
