@@ -1,0 +1,75 @@
+#install.packages("longitudinalData")
+rm(list=ls())
+set.seed(123)
+setwd("E:/2. Other research/1. Classification of Gaussian Process/actual data")
+require(longitudinalData)
+require(tidyverse)
+require(tidyr)
+require(ggplot2)
+library(knitr)
+library(kableExtra)
+library(caret)
+#install.packages("magick")
+#install.packages("webshot")
+#webshot::install_phantomjs()
+#install.packages('processx')
+
+################################################################# load data set
+dat=readRDS("Adrenal-EMRE-dynamic.RDS")
+#separate out the working data and rename variables
+dat0<-cbind.data.frame(mal=as.integer(dat$malignancy),
+                       id=as.factor(dat$lesionID),
+                       time=as.integer(dat$time),
+                       mean=as.numeric(dat$calc_mean))
+################################################################# summary statistics
+dat_sum<-rbind.data.frame(cbind("Malignancy","Dummy variable",round(mean(dat0$mal),3),round(sd(dat0$mal)),round(min(dat0$mal),3),round(max(dat0$mal),3)),
+  cbind("Mean index","Numeric",round(mean(dat0$mean),3),round(sd(dat0$mean),3),round(min(dat0$mean),3),round(max(dat0$mean),3)),
+  cbind("Time of scan","Integer",round(mean(dat0$time),3),round(sd(dat0$time),3),min(dat0$time),max(dat0$time)),
+  cbind("Patient ID","Character","Count=",length(unique(dat0$id)),"Sample=",dim(dat0)[1]))
+colnames(dat_sum)<-c("Variable","Type","Mean","SD","Min","Max")
+kable(dat_sum, caption="Table 1. Summary Statistics") %>%
+  kable_styling(bootstrap_options=c("striped","hover")) %>%
+  save_kable("sumtable.png")
+
+################################################################# plot the data set
+ggplot(data=dat0,aes(x=time,y=mean,color=as.factor(mal)))+
+  geom_point()+
+  geom_line(aes(group=id), alpha = 0.2)+
+  ggtitle("Scan results over time")+
+  xlab("Time of scan")+
+  ylab("Mean Index")+
+  labs(color="Malignancy")+
+  theme_bw()
+ggsave("imp.png",width=4,height=4)
+
+################################################################# split into training and testing sample
+dat1<-spread(dat0,time,mean)
+dat1<-dat1 %>% select(id,names(dat1)[which(names(dat1)!="id")])
+trainIndex<-sample(seq_len(dim(dat1)[1]),size=floor(0.9*nrow(dat1)))
+dat1_train<-dat1[trainIndex,];
+dat1_test<-dat1[-trainIndex,]
+dat1_train_m<-dat1_train[dat1_train$mal==1,];
+dat1_train_b<-dat1_train[dat1_train$mal==0,]
+dat1_test_n<-dat1_test 
+#%>% mutate(mal=NA)
+dat1_m<-rbind(dat1_train_m,dat1_test_n);
+dat1_b<-rbind(dat1_train_b,dat1_test_n)
+
+################################################################# imputation
+j="linearInterpol.locf"
+dat1_m[,2:dim(dat1_m)[2]]<-imputation(as.matrix(dat1_m[,2:dim(dat1_m)[2]]),j)
+dat1_b[,2:dim(dat1_b)[2]]<-imputation(as.matrix(dat1_b[,2:dim(dat1_b)[2]]),j)
+
+################################################################# imputation performance by malignant and benign sample in test data
+dat1_m_i<-dat1_m[which(dat1_m$id %in% dat1_test$id),];
+dat1_b_i<-dat1_b[which(dat1_b$id %in% dat1_test$id),]
+
+dat1_test1<-dat1_test %>% mutate(rs=dim(dat1_test)[2]-2-rowSums(is.na(dat1_test[,3:dim(dat1_test)[2]])))
+adat<-bind_rows(cbind(dat1_m_i,m=as.factor("Malignant")),
+                cbind(dat1_b_i,m=as.factor("Benign")),
+                cbind(dat1_test,m=as.factor("Actual")))
+adat1<-gather(adat,"time","mean",3:(dim(adat)[2]-1));
+adat1<-adat1 %>% arrange(m,id,time)
+adat2<-spread(adat1,"m","mean")
+
+View(adat2)
