@@ -44,14 +44,13 @@ ggsave("imp.png",width=4,height=4)
 
 ################################################################# split into training and testing sample
 dat1<-spread(dat0,time,mean)
-dat1<-dat1 %>% select(id,names(dat1)[which(names(dat1)!="id")])
+dat1<-dat1 %>% select(id,names(dat1)[which(names(dat1)!="id")]) # make id the first variable
 trainIndex<-sample(seq_len(dim(dat1)[1]),size=floor(0.9*nrow(dat1)))
 dat1_train<-dat1[trainIndex,];
 dat1_test<-dat1[-trainIndex,]
 dat1_train_m<-dat1_train[dat1_train$mal==1,];
 dat1_train_b<-dat1_train[dat1_train$mal==0,]
-dat1_test_n<-dat1_test 
-#%>% mutate(mal=NA)
+dat1_test_n<-dat1_test %>% mutate(mal=NA)
 dat1_m<-rbind(dat1_train_m,dat1_test_n);
 dat1_b<-rbind(dat1_train_b,dat1_test_n)
 
@@ -63,6 +62,8 @@ dat1_b[,2:dim(dat1_b)[2]]<-imputation(as.matrix(dat1_b[,2:dim(dat1_b)[2]]),j)
 ################################################################# imputation performance by malignant and benign sample in test data
 dat1_m_i<-dat1_m[which(dat1_m$id %in% dat1_test$id),];
 dat1_b_i<-dat1_b[which(dat1_b$id %in% dat1_test$id),]
+dat1_m_i<-dat1_m_i %>% mutate(mal=NA)
+dat1_b_i<-dat1_b_i %>% mutate(mal=NA)
 
 dat1_test1<-dat1_test %>% mutate(rs=dim(dat1_test)[2]-2-rowSums(is.na(dat1_test[,3:dim(dat1_test)[2]])))
 adat<-bind_rows(cbind(dat1_m_i,m=as.factor("Malignant")),
@@ -71,5 +72,233 @@ adat<-bind_rows(cbind(dat1_m_i,m=as.factor("Malignant")),
 adat1<-gather(adat,"time","mean",3:(dim(adat)[2]-1));
 adat1<-adat1 %>% arrange(m,id,time)
 adat2<-spread(adat1,"m","mean")
+adat2<-adat2 %>% arrange(id,time) %>%
+  group_by(id,time) %>%
+  summarize_at(c("mal","Actual","Benign","Malignant"),mean,na.rm=TRUE)
+adat2$Actual[is.nan(adat2$Actual)==TRUE]<-NA
 
-View(adat2)
+
+########### Plotting selected points to see the performance of imputation
+shortlist<-dat1_test1 %>% filter(rs<=3) %>%  select(id,rs) %>%  arrange(rs) %>%  mutate(rs1=ifelse(rs!=lag(rs),1,0)) %>%
+  mutate(rs1=ifelse(is.na(rs1)==TRUE,1,rs1)) %>%  filter(rs1==1)
+gdat<-adat2 %>% filter(id %in% shortlist$id) %>%
+  rename(Benign_based=Benign) %>%
+  rename(Malignant_based=Malignant)
+gdat<-gather(gdat,"Imputation","mean",4:(dim(gdat)[2]))
+
+ggplot()+
+  geom_line(data=gdat[gdat$Imputation!="Actual",], aes( as.numeric(time),as.numeric(mean),group=id,color=Imputation),lwd=1)+
+  geom_point(data=gdat[gdat$Imputation=="Actual",],aes(as.numeric(time),as.numeric(mean),shape=as.factor(mal)),size=3)+
+  labs(title=paste0("Imputation method: ",j),x="Time of scan", y="Mean index")+theme_bw()+
+  scale_shape(name="Malignant?")
+ggsave(paste0("p_",j,"_.png"),width=4,height=4)
+
+
+############################# choosing the best method
+if(sum((adat2$Actual-adat2$Benign)^2,na.rm=TRUE)>=sum((adat2$Actual-adat2$Malignant)^2,na.rm=TRUE)){
+  print("Malignant performs better")
+  data<-rbind(dat1_m,dat1_train_b)
+  }else{
+    print("Benign performs better")
+    data<-rbind(dat1_b,dat1_train_m)
+    }
+data1<-data %>% mutate(mal>1,NA,mal<-mal)
+
+View(data1)
+######################################################### Analysis
+require(fda.usc)
+mdata<-data[3:dim(data)[2]]
+mlearn=fdata(mdata)
+glearn=data$mal
+dataf<-data.frame(glearn) 
+data1=list("df"=dataf,"x"=mlearn)
+a1<-classif.glm(glearn~x, data=data1)
+newdat<-list("x"=mlearn) 
+p1<-as.factor(predict.classif(a1,newdat) )
+acc=function(x, y){sum(x==y)/length(x)}
+err.glm=acc(p1, glearn)
+
+View(data)
+
+out.glm=classif.glm(glearn~x, data = data1)
+out.np=classif.np(glearn,mlearn)
+out.knn=classif.knn(glearn,mlearn,knn=c(3,5,7))
+out.kernel=classif.kernel(glearn,mlearn)
+
+res.glm=summary.classif(out.glm)
+res.np=summary.classif(out.np)
+res.knn=summary.classif(out.knn)
+res.kernel=summary.classif(out.kernel)
+
+res.glm$prob.classification
+res.np$prob.classification
+res.knn$prob.classification
+res.kernel$prob.classification
+
+#using machine learning
+#neural network
+nn<-train(
+  x=mdata,
+  y=dat2$mal,
+  method="nnet",
+  trace=FALSE)
+res.nn<-c()
+res.nn$nn<-nn
+cm_nn<-confusionMatrix(nn)
+pcc0_nn<-cm_nn$table[1,1]/(cm_nn$table[1,1]+cm_nn$table[2,1])
+pcc1_nn<-cm_nn$table[2,2]/(cm_nn$table[1,2]+cm_nn$table[2,2])
+res.nn$prob.classification<-c(pcc0_nn, pcc1_nn)
+#random forests
+rf<-train(
+  x=mdata,
+  y=dat2$mal,
+  method="ranger")
+res.rf<-c()
+res.rf<-rf
+confusionMatrix(rf)
+cm_rf<-confusionMatrix(rf)
+pcc0_rf<-cm_rf$table[1,1]/(cm_rf$table[1,1]+cm_rf$table[2,1])
+pcc1_rf<-cm_rf$table[2,2]/(cm_rf$table[1,2]+cm_rf$table[2,2])
+res.rf$prob.classification<-c(pcc0_rf, pcc1_rf)
+
+########################################################## All results together
+result<-rbind(unname(res.glm$prob.classification),
+              unname(res.kernel$prob.classification),
+              unname(res.knn$prob.classification),
+              unname(res.np$prob.classification),
+              unname(res.nn$prob.classification),
+              unname(res.rf$prob.classification) )
+Method<-c("GLM","Kernel","K Nearest Neighbors","Non-parametric","Neural Network","Random Forests")
+result1<-cbind.data.frame(Method=Method,"TNR"=result[,1],"TPR"=result[,2])
+#TNR true negative rate probability of identifying benign
+#TPR true positive rate probability of identifying malignant
+
+result2<-cbind(Imputation=i,result1)
+write.table(result2,"results.csv",append=T,sep=",",row.names = F,col.names = F)
+
+#kable(result2, caption="Summary of Findings (Full Data)") %>%
+#  kable_styling(bootstrap_options=c("striped","hover"))
+
+
+
+
+method_list<-c("crossMean", "crossMedian", "crossHotDeck", "linearInterpol.locf", 
+               "linearInterpol.global", "linearInterpol.local", "linearInterpol.bisector", 
+               "trajMean", "trajMedian", "trajHotDeck", "locf", "nocb", "linearInterpol.locf", 
+               "linearInterpol.local", "linearInterpol.global", "linearInterpol.bisector", 
+               "copyMean.locf", "copyMean.local", "copyMean.global", "copyMean.bisector")
+i="crossMean"
+j=1
+if(file.exists("results.csv")){
+  file.remove("results.csv")
+}
+for(i in method_list){
+
+#reshape
+dat1<-spread(dat0,time,mean)
+
+#replace missing values using various method
+dat2<-dat1
+dat2[,3:dim(dat2)[2]]<-imputation(as.matrix(dat2[,3:dim(dat2)[2]]),i)
+
+#make the new data long format
+dat3<-gather(dat2,"time","mean",3:dim(dat2)[2])
+dat4<-merge(dat0,dat3,by=c("id","time","mal"),all=TRUE)
+dat4$time<-as.numeric(dat4$time)
+head(dat4)
+
+#compare observed and fitted
+ggplot(data=dat4)+
+  geom_point(aes(x=time,y=mean.x,color=mal))+
+  geom_line(aes(x=time,y=mean.y,group=id),alpha=.05)+
+  ggtitle(  paste("Scan results over time \n (Method: ",i,")",sep="")  )+
+  xlab("Time of scan")+
+  ylab("Mean Index")+
+  labs(color="Malignancy")+
+  theme_classic()
+ggsave(paste("imp_",j,".png",sep=""),width=4,height=4)
+
+
+
+
+######################################################### Analysis with nonsingular values only
+head(dat1)
+dat1_1<-cbind(dat1,count=dim(dat1[,3:dim(dat1)[2]])[2]-rowSums(is.na(dat1[,3:dim(dat1)[2]])))
+head(dat1_1)
+dat2<-filter(dat1_1,count>1)
+
+dat2[,3:dim(dat2)[2]]<-imputation(as.matrix(dat2[,3:dim(dat2)[2]]),i)
+
+#using fda.usc
+mdata<-dat2[3:dim(dat2)[2]]
+mlearn=fdata(mdata)
+glearn=dat2$mal
+dataf<-data.frame(glearn) 
+data1=list("df"=dataf,"x"=mlearn)
+a1<-classif.glm(glearn~x, data=data1)
+newdat<-list("x"=mlearn) 
+p1<-as.factor(predict.classif(a1,newdat) )
+acc=function(x, y){sum(x==y)/length(x)}
+err.glm=acc(p1, glearn)
+
+out.glm=classif.glm(glearn~x, data = data1)
+out.np=classif.np(glearn,mlearn)
+out.knn=classif.knn(glearn,mlearn,knn=c(3,5,7))
+out.kernel=classif.kernel(glearn,mlearn)
+
+res.glm=summary.classif(out.glm)
+res.np=summary.classif(out.np)
+res.knn=summary.classif(out.knn)
+res.kernel=summary.classif(out.kernel)
+
+res.glm$prob.classification
+res.np$prob.classification
+res.knn$prob.classification
+res.kernel$prob.classification
+
+#using machine learning
+#neural network
+nn<-train(
+  x=mdata,
+  y=dat2$mal,
+  method="nnet",
+  trace=FALSE)
+res.nn<-c()
+res.nn$nn<-nn
+cm_nn<-confusionMatrix(nn)
+pcc0_nn<-cm_nn$table[1,1]/(cm_nn$table[1,1]+cm_nn$table[2,1])
+pcc1_nn<-cm_nn$table[2,2]/(cm_nn$table[1,2]+cm_nn$table[2,2])
+res.nn$prob.classification<-c(pcc0_nn, pcc1_nn)
+#random forests
+rf<-train(
+  x=mdata,
+  y=dat2$mal,
+  method="ranger")
+res.rf<-c()
+res.rf<-rf
+confusionMatrix(rf)
+cm_rf<-confusionMatrix(rf)
+pcc0_rf<-cm_rf$table[1,1]/(cm_rf$table[1,1]+cm_rf$table[2,1])
+pcc1_rf<-cm_rf$table[2,2]/(cm_rf$table[1,2]+cm_rf$table[2,2])
+res.rf$prob.classification<-c(pcc0_rf, pcc1_rf)
+
+########################################################## All results together
+result<-rbind(unname(res.glm$prob.classification),
+              unname(res.kernel$prob.classification),
+              unname(res.knn$prob.classification),
+              unname(res.np$prob.classification),
+              unname(res.nn$prob.classification),
+              unname(res.rf$prob.classification) )
+Method<-c("GLM","Kernel","K Nearest Neighbors","Non-parametric","Neural Network","Random Forests")
+result1<-cbind.data.frame(Method=Method,"TNR"=result[,1],"TPR"=result[,2])
+#TNR true negative rate probability of identifying benign
+#TPR true positive rate probability of identifying malignant
+
+result2<-cbind(Imputation=i,result1)
+write.table(result2,"results.csv",append=T,sep=",",row.names = F,col.names = F)
+
+#kable(result2, caption="Summary of Findings (More than One Time Points)") %>%
+#  kable_styling(bootstrap_options=c("striped","hover"))
+
+j=j+1
+}
